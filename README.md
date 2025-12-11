@@ -127,6 +127,180 @@ cache:
 
 ---
 
+## CircleCI
+
+### Option A: Shared cache key
+
+```yaml
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: cimg/node:20.0
+    working_directory: ~/project
+    environment:
+      ELM_HOME: ~/project/.elm
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - elm
+      - run: npm install -g elm
+      - run: elm make src/Main.elm --optimize
+      - save_cache:
+          key: elm
+          paths:
+            - ~/project/.elm
+```
+
+### Option B: Hash-based cache key
+
+```yaml
+steps:
+  - checkout
+  - restore_cache:
+      keys:
+        - elm-{{ checksum "elm.json" }}
+        - elm-
+  - run: npm install -g elm
+  - run: elm make src/Main.elm --optimize
+  - save_cache:
+      key: elm-{{ checksum "elm.json" }}
+      paths:
+        - ~/project/.elm
+```
+
+With elm-review (or other tools with their own `elm.json`):
+
+```yaml
+- restore_cache:
+    keys:
+      - elm-{{ checksum "elm.json" }}-{{ checksum "review/elm.json" }}
+      - elm-
+```
+
+> **Note:** The second key (`elm-`) acts as a fallback for partial cache hits. Cache paths must match `ELM_HOME`.
+
+---
+
+## Azure Pipelines
+
+### Option A: Shared cache key
+
+```yaml
+trigger:
+  - main
+
+variables:
+  ELM_HOME: $(Pipeline.Workspace)/.elm
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - task: Cache@2
+    inputs:
+      key: '"elm"'
+      path: $(ELM_HOME)
+    displayName: Cache ELM_HOME
+
+  - script: npm install -g elm
+    displayName: Install Elm
+
+  - script: elm make src/Main.elm --optimize
+    displayName: Build
+```
+
+### Option B: Hash-based cache key
+
+```yaml
+- task: Cache@2
+  inputs:
+    key: '"elm" | elm.json'
+    restoreKeys: |
+      "elm"
+    path: $(ELM_HOME)
+  displayName: Cache ELM_HOME
+```
+
+With elm-review (or other tools with their own `elm.json`):
+
+```yaml
+- task: Cache@2
+  inputs:
+    key: '"elm" | elm.json | review/elm.json'
+    restoreKeys: |
+      "elm"
+    path: $(ELM_HOME)
+  displayName: Cache ELM_HOME
+```
+
+> **Note:** Wrap static strings in quotes to prevent them being interpreted as file paths.
+
+---
+
+## Bitbucket Pipelines
+
+### Option A: Shared cache key
+
+```yaml
+definitions:
+  caches:
+    elm: .elm
+
+pipelines:
+  default:
+    - step:
+        name: Build
+        caches:
+          - elm
+        script:
+          - export ELM_HOME=$BITBUCKET_CLONE_DIR/.elm
+          - npm install -g elm
+          - elm make src/Main.elm --optimize
+```
+
+### Option B: Hash-based cache key
+
+```yaml
+definitions:
+  caches:
+    elm:
+      key:
+        files:
+          - elm.json
+      path: .elm
+
+pipelines:
+  default:
+    - step:
+        name: Build
+        caches:
+          - elm
+        script:
+          - export ELM_HOME=$BITBUCKET_CLONE_DIR/.elm
+          - npm install -g elm
+          - elm make src/Main.elm --optimize
+```
+
+With elm-review (or other tools with their own `elm.json`):
+
+```yaml
+definitions:
+  caches:
+    elm:
+      key:
+        files:
+          - elm.json
+          - review/elm.json
+      path: .elm
+```
+
+> **Note:** Bitbucket cache definitions don't support variables, so ensure the cache path (`.elm`) matches where `ELM_HOME` points. Bitbucket Pipelines does not support fallback keys for file-based caches.
+
+---
+
 ## Shared vs. Hash-based Cache Keys
 
 **Option A (Shared key):** All builds share the same cache.
@@ -139,8 +313,8 @@ cache:
 **Option B (Hash-based key):** Cache key changes when `elm.json` changes.
 
 - ✅ Clean cache when dependencies change
-- ✅ With `restore-keys` (GitHub Actions), still get partial cache hits
-- ⚠️ Without `restore-keys` support (GitLab CI), a full re-download occurs whenever dependencies change
+- ✅ With `restore-keys` (GitHub Actions, CircleCI, Azure Pipelines), still get partial cache hits
+- ⚠️ Without `restore-keys` support (GitLab CI, Bitbucket Pipelines), a full re-download occurs whenever dependencies change
 
 **Recommendation:** Option A (shared key) is often sufficient since `ELM_HOME` is immutable – packages are only ever added, never modified. Option B is useful if you want stricter cache hygiene or if your CI provider supports `restore-keys` for partial cache reuse.
 
@@ -150,7 +324,7 @@ cache:
 
 1. **`ELM_HOME` is shared** – It doesn't matter how many Elm projects or tools you have; they all benefit from the same cache.
 
-2. **Use `restore-keys` for partial cache hits** – When dependencies change, you'll still get the previous cache and only need to download the _new_ packages. Use this whenever your CI provider supports it (e.g., GitHub Actions). Some providers like GitLab CI don't have an equivalent mechanism.
+2. **Use `restore-keys` for partial cache hits** – When dependencies change, you'll still get the previous cache and only need to download the _new_ packages. Use this whenever your CI provider supports it (GitHub Actions, CircleCI, Azure Pipelines). Some providers like GitLab CI and Bitbucket Pipelines don't have an equivalent mechanism.
 
 3. **The cache is immutable** – Package contents never change for a given version, making it perfectly safe to cache indefinitely.
 
@@ -174,4 +348,4 @@ cache:
 
 ## Contributing
 
-Have experience with other CI systems (CircleCI, Jenkins, Azure Pipelines, etc.)? Contributions are welcome!
+Have experience with other CI systems (Jenkins, Travis CI, etc.)? Contributions are welcome!
