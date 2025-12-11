@@ -11,8 +11,9 @@ This guide shows how to properly cache Elm dependencies in CI/CD pipelines. By c
 Elm stores all downloaded packages and their compiled artifacts in a directory called `ELM_HOME` (defaults to `~/.elm`). This cache is:
 
 - **Shared across all projects** on the same machine
-- **Essentially immutable** – once a package version is downloaded, it doesn't change
 - **Safe to cache** between CI runs
+
+The downloaded artifacts are immutable. They all have a specific hash that is checked by Elm. `ELM_HOME` also contains the elmi and elmo for the packages, so those are deterministic as well.
 
 By saving and restoring `ELM_HOME` between builds, you only need network access when you _add_ a new dependency – not on every build.
 
