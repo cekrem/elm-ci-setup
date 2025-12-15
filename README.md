@@ -15,32 +15,32 @@ Elm stores all downloaded packages and their compiled artifacts in a directory c
 - **Shared across all projects** on the same machine
 - **Safe to cache** between CI runs
 
-The downloaded artifacts are immutable. They all have a specific hash that is checked by Elm. `ELM_HOME` also contains the elmi and elmo for the packages, so those are deterministic as well.
+The downloaded artifacts are immutable — each package version has a specific hash that Elm verifies. `ELM_HOME` also contains compiled artifacts (`.elmi` and `.elmo` files) for packages, and these are deterministic as well.
 
-By saving and restoring `ELM_HOME` between builds, you only need network access when you _add_ a new dependency – not on every build. This is simpler, faster, and more reliable than, say, setting up a mirror of package.elm-lang.org.
+By saving and restoring `ELM_HOME` between builds, you only need network access when you add a new dependency — not on every build. This is simpler, faster, and more reliable than setting up a mirror of package.elm-lang.org.
 
-Since package contents never change for a given version, **it is perfectly safe to cache indefinitely.**
+Since package contents never change for a given version, **the cache is perfectly safe to keep indefinitely.**
 
 ---
 
-## Shared vs. Hash-based Cache Keys
+## Cache Key Strategy
 
-Each CI example below shows two options for cache keys:
+**Use a hash of `elm.json` as your cache key**, with a fallback key where supported.
 
-**Option A (Shared key):** All builds share the same cache.
+**Why not a simple shared key like `elm`?** Most CI systems only save the cache when the key doesn't already exist:
 
-- ✅ Simplest setup
-- ✅ Cache always hits after the first build
-- ✅ New packages are added incrementally
-- ⚠️ Cache may accumulate unused packages over time (usually not a problem in practice)
+1. First build saves the cache ✓
+2. You add a dependency → cache is **not updated** (key already exists)
+3. Every subsequent build re-downloads that dependency
 
-**Option B (Hash-based key):** Cache key changes when `elm.json` changes.
+With hash-based keys + fallback:
 
-- ✅ Clean cache when dependencies change
-- ✅ With `restore-keys` (GitHub Actions, CircleCI, Azure Pipelines), still get partial cache hits
-- ⚠️ Without `restore-keys` support (GitLab CI, Bitbucket Pipelines), a full re-download occurs whenever dependencies change
+1. When `elm.json` changes, a new cache key is generated
+2. The previous cache is restored via fallback/prefix matching
+3. Only the new dependencies are downloaded
+4. The updated cache is saved under the new key
 
-**Recommendation:** Option A (shared key) is often sufficient since `ELM_HOME` is immutable – packages are only ever added, never modified. Option B is useful if you want stricter cache hygiene or if your CI provider supports `restore-keys` for partial cache reuse.
+See the CI-specific examples below for exact syntax.
 
 ---
 
@@ -55,8 +55,6 @@ Each CI example below shows two options for cache keys:
 ---
 
 ### GitHub Actions
-
-#### Option A: Shared cache key
 
 ```yaml
 name: Elm CI
@@ -80,21 +78,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.ELM_HOME }}
-          key: elm
+          key: elm-${{ hashFiles('elm.json') }}
+          restore-keys: |
+            elm-
 
       - name: Build
         run: elm make src/Main.elm --optimize
-```
-
-#### Option B: Hash-based cache key
-
-```yaml
-- name: Cache ELM_HOME
-  uses: actions/cache@v4
-  with:
-    path: ${{ env.ELM_HOME }}
-    key: elm-${{ hashFiles('elm.json') }}
-    restore-keys: elm-
 ```
 
 With elm-review (or other tools with their own `elm.json`):
@@ -105,16 +94,15 @@ With elm-review (or other tools with their own `elm.json`):
   with:
     path: ${{ env.ELM_HOME }}
     key: elm-${{ hashFiles('elm.json', 'review/elm.json') }}
-    restore-keys: elm-
+    restore-keys: |
+      elm-
 ```
 
-> **Note:** You can add as many `elm.json` files as needed to the `hashFiles()` function.
+> **Tip:** Add all `elm.json` files to `hashFiles()` — this ensures the cache updates when any of them change.
 
 ---
 
 ### GitLab CI
-
-#### Option A: Shared cache key
 
 ```yaml
 stages:
@@ -124,9 +112,11 @@ variables:
   ELM_HOME: $CI_PROJECT_DIR/.elm
 
 cache:
-  key: elm
+  key:
+    files:
+      - elm.json
   paths:
-    - $ELM_HOME
+    - .elm
 
 build:
   stage: build
@@ -135,17 +125,6 @@ build:
     - npm install -g elm
   script:
     - elm make src/Main.elm --optimize
-```
-
-#### Option B: Hash-based cache key
-
-```yaml
-cache:
-  key:
-    files:
-      - elm.json
-  paths:
-    - $ELM_HOME
 ```
 
 With elm-review (or other tools with their own `elm.json`):
@@ -157,14 +136,14 @@ cache:
       - elm.json
       - review/elm.json
   paths:
-    - $ELM_HOME
+    - .elm
 ```
+
+> **Note:** GitLab CI does not support fallback keys. When `elm.json` changes, a full re-download occurs. This is typically fast since Elm packages are small. The cache path `.elm` is relative to the project directory and matches `ELM_HOME`.
 
 ---
 
 ### CircleCI
-
-#### Option A: Shared cache key
 
 ```yaml
 version: 2.1
@@ -180,30 +159,14 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - elm
+            - elm-{{ checksum "elm.json" }}
+            - elm-
       - run: npm install -g elm
       - run: elm make src/Main.elm --optimize
       - save_cache:
-          key: elm
+          key: elm-{{ checksum "elm.json" }}
           paths:
             - ~/project/.elm
-```
-
-#### Option B: Hash-based cache key
-
-```yaml
-steps:
-  - checkout
-  - restore_cache:
-      keys:
-        - elm-{{ checksum "elm.json" }}
-        - elm-
-  - run: npm install -g elm
-  - run: elm make src/Main.elm --optimize
-  - save_cache:
-      key: elm-{{ checksum "elm.json" }}
-      paths:
-        - ~/project/.elm
 ```
 
 With elm-review (or other tools with their own `elm.json`):
@@ -213,15 +176,17 @@ With elm-review (or other tools with their own `elm.json`):
     keys:
       - elm-{{ checksum "elm.json" }}-{{ checksum "review/elm.json" }}
       - elm-
+- save_cache:
+    key: elm-{{ checksum "elm.json" }}-{{ checksum "review/elm.json" }}
+    paths:
+      - ~/project/.elm
 ```
 
-> **Note:** The second key (`elm-`) acts as a fallback for partial cache hits. Cache paths must match `ELM_HOME`.
+> **Note:** The second key (`elm-`) acts as a fallback, restoring the most recent cache with that prefix.
 
 ---
 
 ### Azure Pipelines
-
-#### Option A: Shared cache key
 
 ```yaml
 trigger:
@@ -236,7 +201,9 @@ pool:
 steps:
   - task: Cache@2
     inputs:
-      key: '"elm"'
+      key: '"elm" | elm.json'
+      restoreKeys: |
+        "elm"
       path: $(ELM_HOME)
     displayName: Cache ELM_HOME
 
@@ -245,18 +212,6 @@ steps:
 
   - script: elm make src/Main.elm --optimize
     displayName: Build
-```
-
-#### Option B: Hash-based cache key
-
-```yaml
-- task: Cache@2
-  inputs:
-    key: '"elm" | elm.json'
-    restoreKeys: |
-      "elm"
-    path: $(ELM_HOME)
-  displayName: Cache ELM_HOME
 ```
 
 With elm-review (or other tools with their own `elm.json`):
@@ -276,27 +231,6 @@ With elm-review (or other tools with their own `elm.json`):
 ---
 
 ### Bitbucket Pipelines
-
-#### Option A: Shared cache key
-
-```yaml
-definitions:
-  caches:
-    elm: .elm
-
-pipelines:
-  default:
-    - step:
-        name: Build
-        caches:
-          - elm
-        script:
-          - export ELM_HOME=$BITBUCKET_CLONE_DIR/.elm
-          - npm install -g elm
-          - elm make src/Main.elm --optimize
-```
-
-#### Option B: Hash-based cache key
 
 ```yaml
 definitions:
@@ -332,7 +266,7 @@ definitions:
       path: .elm
 ```
 
-> **Note:** Bitbucket cache definitions don't support variables, so ensure the cache path (`.elm`) matches where `ELM_HOME` points. Bitbucket Pipelines does not support fallback keys for file-based caches.
+> **Note:** Bitbucket cache definitions don't support variables, so ensure the cache path (`.elm`) matches where `ELM_HOME` points. Bitbucket Pipelines does not support fallback keys, so a full re-download occurs when dependencies change.
 
 ---
 
@@ -340,13 +274,13 @@ definitions:
 
 **Cache not being restored?**
 
-- Ensure the cache path matches where Elm actually stores data (i.e., the `ELM_HOME` you configured)
+- Ensure the cache path matches the `ELM_HOME` directory you configured
+- Check your CI provider's cache logs for errors
 
 **Still seeing network requests?**
 
-- A new dependency was added (expected behavior)
-- The cache key changed, triggering a fresh download
-- Check that `ELM_HOME` environment variable is set correctly
+- A new dependency was added (expected — new packages must be downloaded once)
+- Check that the `ELM_HOME` environment variable is set correctly before `elm make` runs
 
 ---
 
