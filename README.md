@@ -53,6 +53,8 @@ See the CI-specific examples below for exact syntax.
 - [CircleCI](#circleci)
 - [Azure Pipelines](#azure-pipelines)
 - [Bitbucket Pipelines](#bitbucket-pipelines)
+- [Travis CI](#travis-ci)
+- [AWS CodeBuild](#aws-codebuild)
 
 ---
 
@@ -143,7 +145,7 @@ cache:
 
 > **Note:** The cache path `.elm` is relative to the project directory and matches `ELM_HOME`.
 
-#### Advanced: Fallback Keys with Branch Isolation (GitLab 16.5+)
+#### Advanced: Fallback Keys with Branch Isolation (GitLab 16.0+)
 
 The basic setup above causes a full re-download whenever `elm.json` changes. For larger projects, you can use `fallback_keys` combined with a write-only cache job to get incremental updates (and use the partial cache from earlier builds):
 
@@ -332,6 +334,83 @@ definitions:
 
 ---
 
+### Travis CI
+
+```yaml
+language: node_js
+node_js:
+  - "20"
+
+env:
+  global:
+    - ELM_HOME=$HOME/.elm
+
+cache:
+  directories:
+    - $HOME/.elm
+
+install:
+  - npm install -g elm
+
+script:
+  - elm make src/Main.elm --optimize
+```
+
+With elm-review (or other tools with their own `elm.json`):
+
+```yaml
+cache:
+  directories:
+    - $HOME/.elm
+```
+
+> **Note:** Travis CI uses path-based caching without hash keys. There is one cache per branch — if a branch doesn't have its own cache, Travis CI fetches the default branch's cache. The cache updates automatically when the directory contents change.
+
+---
+
+### AWS CodeBuild
+
+```yaml
+version: 0.2
+
+env:
+  variables:
+    ELM_HOME: /root/.elm
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - npm install -g elm
+
+  build:
+    commands:
+      - elm make src/Main.elm --optimize
+
+cache:
+  key: elm-$(codebuild-hash-files elm.json)
+  fallback-keys:
+    - elm-
+  paths:
+    - /root/.elm/**/*
+```
+
+With elm-review (or other tools with their own `elm.json`):
+
+```yaml
+cache:
+  key: elm-$(codebuild-hash-files elm.json review/elm.json)
+  fallback-keys:
+    - elm-
+  paths:
+    - /root/.elm/**/*
+```
+
+> **Note:** CodeBuild requires an S3 bucket configured in your project settings for caching. The `codebuild-hash-files` command generates a SHA-256 hash of the specified files, and `fallback-keys` uses prefix matching when no exact key match exists.
+
+---
+
 ## Troubleshooting
 
 **Cache not being restored?**
@@ -348,4 +427,4 @@ definitions:
 
 ## Contributing
 
-Have experience with other CI systems (Jenkins, Travis CI, etc.)? Contributions are welcome!
+Have experience with other CI systems (Jenkins, Buildkite, etc.)? Contributions are welcome!
