@@ -40,6 +40,8 @@ With hash-based keys + fallback:
 3. Only the new dependencies are downloaded
 4. The updated cache is saved under the new key
 
+**How fallback keys work:** Most CI systems let you specify a prefix (like `elm-`). When no exact match exists, the system restores the most recent cache whose key starts with that prefix — giving you a partial cache to build on.
+
 See the CI-specific examples below for exact syntax.
 
 ---
@@ -139,7 +141,67 @@ cache:
     - .elm
 ```
 
-> **Note:** GitLab CI does not support fallback keys. When `elm.json` changes, a full re-download occurs. This is typically fast since Elm packages are small. The cache path `.elm` is relative to the project directory and matches `ELM_HOME`.
+> **Note:** The cache path `.elm` is relative to the project directory and matches `ELM_HOME`.
+
+#### Advanced: Fallback Keys with Branch Isolation (GitLab 16.5+)
+
+The basic setup above causes a full re-download whenever `elm.json` changes. For larger projects, you can use `fallback_keys` combined with a write-only cache job to get incremental updates (and use the partial cache from earlier builds):
+
+```yaml
+stages:
+  - build
+
+variables:
+  ELM_HOME: $CI_PROJECT_DIR/.elm
+
+build:
+  stage: build
+  image: node:20
+  before_script:
+    - npm install -g elm
+  script:
+    - elm make src/Main.elm --optimize
+  cache:
+    - key:
+        files:
+          - elm.json
+      fallback_keys:
+        - elm-$CI_COMMIT_REF_SLUG
+        - elm-main
+      paths:
+        - .elm
+
+elm-cache-push:
+  stage: build
+  image: node:20
+  script:
+    - echo "Updating elm cache for branch $CI_COMMIT_REF_SLUG"
+  cache:
+    - key: elm-$CI_COMMIT_REF_SLUG
+      paths:
+        - .elm
+      policy: push
+  rules:
+    - changes:
+        - elm.json
+  needs:
+    - build
+```
+
+**How it works:**
+
+1. **Primary key** — Hash of `elm.json`. When dependencies haven't changed, you get an exact cache hit.
+
+2. **Fallback keys** — When `elm.json` changes (no exact match), GitLab tries `elm-$CI_COMMIT_REF_SLUG` (branch-specific), then `elm-main` (shared baseline). This restores the previous cache so only new packages are downloaded.
+
+3. **Write-only cache job** — The `elm-cache-push` job uses `policy: push` to write (not read) the cache under the branch-specific key. It only runs when `elm.json` changes, keeping the fallback cache fresh.
+
+**Benefits:**
+
+- **Incremental updates** — Adding one dependency doesn't re-download everything
+- **Branch isolation** — Experimental dependency changes on feature branches don't affect other branches
+- **Shared baseline** — New branches start with the `main` branch cache
+- **Minimal overhead** — The cache-push job only runs when `elm.json` actually changes
 
 ---
 
