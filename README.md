@@ -73,13 +73,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Elm
         run: npm install -g elm
 
       - name: Cache ELM_HOME
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.ELM_HOME }}
           key: elm-${{ hashFiles('elm.json') }}
@@ -94,7 +94,7 @@ With elm-review (or other tools with their own `elm.json`):
 
 ```yaml
 - name: Cache ELM_HOME
-  uses: actions/cache@v4
+  uses: actions/cache@v6
   with:
     path: ${{ env.ELM_HOME }}
     key: elm-${{ hashFiles('elm.json', 'review/elm.json') }}
