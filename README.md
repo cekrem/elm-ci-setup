@@ -15,7 +15,7 @@ Elm stores all downloaded packages and their compiled artifacts in a directory c
 - **Shared across all projects** on the same machine
 - **Safe to cache** between CI runs
 
-The downloaded artifacts are immutable — each package version has a specific hash that Elm verifies. `ELM_HOME` also contains compiled artifacts (`.elmi` and `.elmo` files) for packages, and these are deterministic as well.
+The downloaded artifacts are immutable — each package version has a specific hash that Elm verifies.
 
 By saving and restoring `ELM_HOME` between builds, you only need network access when you add a new dependency — not on every build. This is simpler, faster, and more reliable than setting up a mirror of package.elm-lang.org.
 
